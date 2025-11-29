@@ -37,7 +37,7 @@ pub enum TokenKind {
     Equal,
     String,
     Ident,
-    Number(f64),
+    Number,
     And,
     Class,
     Else,
@@ -54,6 +54,9 @@ pub enum TokenKind {
     True,
     Var,
     While,
+    // Special
+    Error,
+    Eof,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,7 +94,7 @@ impl fmt::Display for Token<'_> {
             TokenKind::Equal => write!(f, "EQUAL <{line}, {column}> {lexeme}"),
             TokenKind::String => write!(f, "STRING <{line}, {column}> {lexeme}"),
             TokenKind::Ident => write!(f, "IDENTIFIER <{line}, {column}> {lexeme}"),
-            TokenKind::Number(_) => write!(f, "NUMBER <{line}, {column}> {lexeme}"),
+            TokenKind::Number => write!(f, "NUMBER <{line}, {column}> {lexeme}"),
             TokenKind::And => write!(f, "AND <{line}, {column}> {lexeme}"),
             TokenKind::Class => write!(f, "CLASS <{line}, {column}> {lexeme}"),
             TokenKind::Else => write!(f, "ELSE <{line}, {column}> {lexeme}"),
@@ -108,6 +111,8 @@ impl fmt::Display for Token<'_> {
             TokenKind::True => write!(f, "TRUE <{line}, {column}> {lexeme}"),
             TokenKind::Var => write!(f, "VAR <{line}, {column}> {lexeme}"),
             TokenKind::While => write!(f, "WHILE <{line}, {column}> {lexeme}"),
+            TokenKind::Error => write!(f, "ERROR <{line}, {column}> {lexeme}"),
+            TokenKind::Eof => write!(f, "EOF <{line}, {column}> {lexeme}"),
         }
     }
 }
@@ -293,18 +298,11 @@ impl<'a> Iterator for Lexer<'a> {
                     let extra_bytes = lexeme.len() - c.len_utf8();
                     self.rest = &self.rest[extra_bytes..];
 
-                    let n = match lexeme.parse() {
-                        Ok(n) => n,
-                        Err(e) => {
-                            return Some(Err(LexerError::EmptyInput));
-                        }
-                    };
-
                     let columnno = self.columnno;
                     self.columnno += lexeme.len();
                     return Some(Ok(Token {
                         lexeme,
-                        kind: TokenKind::Number(n),
+                        kind: TokenKind::Number,
                         lineno: self.lineno,
                         columnno,
                     }));
