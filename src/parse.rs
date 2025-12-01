@@ -4,26 +4,32 @@ use crate::{
 };
 
 pub mod ast {
+
+    use crate::lex::Token;
+    use std::fmt;
+
     pub struct Statement {}
-
-    pub enum BinaryOp {
-        Minus,
-        Plus,
-        Star,
-        Slash,
-        Equal,
-    }
-
-    pub enum UnaryOp {
-        Minus,
-        Bang,
-    }
 
     pub enum ExpressionTree {
         Number(u32),
         Identifier(String),
-        Unary(UnaryOp, Box<ExpressionTree>),
-        Binary(BinaryOp, Box<(ExpressionTree, ExpressionTree)>),
+        Unary(String, Box<ExpressionTree>),
+        Binary(String, Box<(ExpressionTree, ExpressionTree)>),
+    }
+
+    impl fmt::Display for ExpressionTree {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                ExpressionTree::Number(x) => write!(f, "{}", x),
+                ExpressionTree::Identifier(id) => write!(f, "{}", id),
+                ExpressionTree::Unary(token, operand) => {
+                    write!(f, "({} {})", token, operand)
+                }
+                ExpressionTree::Binary(token, operands) => {
+                    write!(f, "({} {} {})", token, operands.0, operands.1)
+                }
+            }
+        }
     }
 }
 
@@ -37,58 +43,24 @@ pub struct Parser<'a> {
 
 type ParseResult<'a> = Result<ast::ExpressionTree, ParseError>;
 
-fn precedence(kind: TokenKind) -> u8 {
+fn infix_binding_power(kind: TokenKind) -> Option<(u8, u8)> {
     match kind {
-        // None
-        TokenKind::Equal => 1,
+        TokenKind::Equal => Some((2, 1)),
+        TokenKind::Or | TokenKind::And => Some((3, 4)),
+        TokenKind::EqualEqual | TokenKind::BangEqual => Some((5, 6)),
+        TokenKind::Greater | TokenKind::Less | TokenKind::LessEqual | TokenKind::GreaterEqual => {
+            Some((7, 8))
+        }
+        TokenKind::Plus | TokenKind::Minus => Some((9, 10)),
+        TokenKind::Star | TokenKind::Slash => Some((11, 12)),
+        _ => None,
+    }
+}
 
-        TokenKind::Or => 3,
-        TokenKind::And => 3,
-
-        TokenKind::EqualEqual => 5,
-        TokenKind::BangEqual => 5,
-
-        TokenKind::Greater => 7,
-        TokenKind::Less => 7,
-        TokenKind::LessEqual => 7,
-        TokenKind::GreaterEqual => 7,
-
-        TokenKind::Plus => 9,
-        TokenKind::Minus => 9,
-
-        TokenKind::Star => 9,
-        TokenKind::Slash => 9,
-
-        // Unary minus
-        TokenKind::Bang => 11,
-
-        // Dot and call
-        TokenKind::Dot => 13,
-        TokenKind::LeftParen => 13,
-        TokenKind::RightParen => 13,
-
-        _ => panic!("TokenKind doesn't have precedence"),
-        // TokenKind::LeftBrace => todo!(),
-        // TokenKind::RightBrace => todo!(),
-        // TokenKind::Comma => todo!(),
-        // TokenKind::Semicolon => todo!(),
-        // TokenKind::String => todo!(),
-        // TokenKind::Ident => todo!(),
-        // TokenKind::Number(_) => todo!(),
-        // TokenKind::Class => todo!(),
-        // TokenKind::Else => todo!(),
-        // TokenKind::False => todo!(),
-        // TokenKind::For => todo!(),
-        // TokenKind::Fun => todo!(),
-        // TokenKind::If => todo!(),
-        // TokenKind::Nil => todo!(),
-        // TokenKind::Print => todo!(),
-        // TokenKind::Return => todo!(),
-        // TokenKind::Super => todo!(),
-        // TokenKind::This => todo!(),
-        // TokenKind::True => todo!(),
-        // TokenKind::Var => todo!(),
-        // TokenKind::While => todo!(),
+fn prefix_binding_power(kind: TokenKind) -> u8 {
+    match kind {
+        TokenKind::Plus | TokenKind::Minus => 51,
+        _ => panic!("Unexpected token as prefix operator: {:?}", kind),
     }
 }
 
@@ -118,12 +90,19 @@ impl<'a> Parser<'a> {
             .expect("Iteration past the end")
     }
 
-    pub fn next(&mut self) {
+    pub fn advance(&mut self) {
         // Note: Doesn't advance the current token past Eof. Since Eof is mandatory
         // we can safely unwrap the get call.
         if self.tokens.get(self.current).unwrap().kind != TokenKind::Eof {
             self.current += 1;
         }
+    }
+
+    pub fn next(&mut self) -> &Token<'_> {
+        self.advance();
+        self.tokens
+            .get(self.current - 1)
+            .expect("Iteration past the end")
     }
 
     pub fn check(&self, kind: TokenKind) -> bool {
@@ -135,7 +114,7 @@ impl<'a> Parser<'a> {
             let tok = self.tokens.get(self.current);
             // Note: Doesn't advance the current token past Eof. Since Eof is mandatory
             // we can safely unwrap the get call.
-            if self.tokens.get(self.current).unwrap().kind != TokenKind::Eof {
+            if tok.unwrap().kind != TokenKind::Eof {
                 self.current += 1;
             }
             return tok;
@@ -156,68 +135,80 @@ impl<'a> Parser<'a> {
     }
 
     fn expr_bp(&mut self, min_bp: u8) -> ast::ExpressionTree {
-        let lhs = match self.peek().kind {
+        let mut lhs = match self.peek().kind {
             TokenKind::Number => ast::ExpressionTree::Number(
-                self.peek()
+                self.next()
                     .lexeme
                     .parse()
                     .expect("Lexer validated number failed to parse"),
             ),
-            TokenKind::Ident => ast::ExpressionTree::Identifier(self.peek().lexeme.into()),
+            TokenKind::Ident => ast::ExpressionTree::Identifier(self.next().lexeme.into()),
+            TokenKind::Plus | TokenKind::Minus => {
+                let tok = self.next();
+                let bp = prefix_binding_power(tok.kind);
+                ast::ExpressionTree::Unary(tok.lexeme.into(), Box::new(self.expr_bp(bp)))
+            }
             TokenKind::LeftParen => {
+                self.advance();
                 let lhs = self.expr_bp(0);
-                // TODO: Handle error.
-                self.expect(TokenKind::RightParen);
+                // TODO: Handle errors better.
+                self.expect(TokenKind::RightParen)
+                    .expect("RightParen should follow in expression");
                 lhs
             }
-            // TODO: Prefix operators.
             t => panic!("bad token: {:?}", t),
         };
         loop {
             let op = match self.peek().kind {
                 TokenKind::Eof => break,
-                TokenKind::Plus => ast::BinaryOp::Plus,
-                t => panic!("bad token: {:?}", t),
+                TokenKind::Plus => TokenKind::Plus,
+                TokenKind::Minus => TokenKind::Minus,
+                TokenKind::Star => TokenKind::Star,
+                TokenKind::Slash => TokenKind::Slash,
+                // Can follow expression, not an error but also not a classic op
+                TokenKind::RightParen => TokenKind::RightParen,
+                // All other tokes - error
+                _ => panic!("bad token: {:?}", self.peek()),
             };
-            // TODO: Handle postfix operators.
-
-            // TODO: Make op copy.
-            if let Some((l_bp, r_bp)) = Self::infix_binding_power(&op) {
+            if let Some((l_bp, r_bp)) = infix_binding_power(op) {
                 if l_bp < min_bp {
                     break;
                 }
-                self.next();
+                // TODO: refactor operator to string properly.
+                let s = self.peek().lexeme.to_owned();
+                self.advance();
                 let rhs = self.expr_bp(r_bp);
-                return ast::ExpressionTree::Binary(op, Box::new((lhs, rhs)));
+                lhs = ast::ExpressionTree::Binary(s, Box::new((lhs, rhs)));
+                continue;
             }
             break;
         }
         lhs
     }
+}
 
-    // fn prefix_binding_power(op: char) -> ((), u8) {
-    //     match op {
-    //         '+' | '-' => ((), 9),
-    //         _ => panic!("bad op: {:?}", op),
-    //     }
-    // }
-    //
-    // fn postfix_binding_power(op: char) -> Option<(u8, ())> {
-    //     let res = match op {
-    //         '!' => (11, ()),
-    //         '[' => (11, ()),
-    //         _ => return None,
-    //     };
-    //     Some(res)
-    // }
-
-    fn infix_binding_power(op: &ast::BinaryOp) -> Option<(u8, u8)> {
-        let res = match op {
-            ast::BinaryOp::Equal => (2, 1),
-            ast::BinaryOp::Plus | ast::BinaryOp::Minus => (5, 6),
-            ast::BinaryOp::Star | ast::BinaryOp::Slash => (7, 8),
-            // _ => return None,
-        };
-        Some(res)
+#[test]
+fn tests() {
+    fn parse_expr(s: &str) -> ast::ExpressionTree {
+        let mut parser = Parser::new(s);
+        parser.expression()
     }
+
+    let s = parse_expr("1");
+    assert_eq!(s.to_string(), "1");
+
+    let s = parse_expr("1 + 2 * 3");
+    assert_eq!(s.to_string(), "(+ 1 (* 2 3))");
+
+    let s = parse_expr("a + Bar * cloc * de12 + ebin");
+    assert_eq!(s.to_string(), "(+ (+ a (* (* Bar cloc) de12)) ebin)");
+
+    let s = parse_expr("--1 * 2");
+    assert_eq!(s.to_string(), "(* (- (- 1)) 2)");
+
+    let s = parse_expr("+--foo");
+    assert_eq!(s.to_string(), "(+ (- (- foo)))");
+
+    let s = parse_expr("(((0)))");
+    assert_eq!(s.to_string(), "0");
 }
