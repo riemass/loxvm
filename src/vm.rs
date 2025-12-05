@@ -1,3 +1,4 @@
+use crate::Value;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::fmt::Display;
 
@@ -5,6 +6,11 @@ use std::fmt::Display;
 #[repr(u8)]
 pub enum OpCode {
     Constant,
+    OpAdd,
+    OpSubtract,
+    OpMultiply,
+    OpDivide,
+    OpNegate,
     Print,
     Return,
 }
@@ -15,16 +21,20 @@ impl Display for OpCode {
             OpCode::Constant => write!(f, "Const"),
             OpCode::Print => write!(f, "Print"),
             OpCode::Return => write!(f, "Return"),
+            OpCode::OpAdd => write!(f, "Add"),
+            OpCode::OpSubtract => write!(f, "Sub"),
+            OpCode::OpMultiply => write!(f, "Mul"),
+            OpCode::OpDivide => write!(f, "Div"),
+            OpCode::OpNegate => write!(f, "Neg"),
         }
     }
 }
 
-// TODO: Introduce Value type instead of f64
 pub struct Chunk {
     name: String,
     pub code: Vec<u8>,
-    pub constants: Vec<f64>,
-    pub variables: Vec<f64>,
+    pub constants: Vec<Value>,
+    pub variables: Vec<Value>,
 }
 
 impl std::fmt::Debug for Chunk {
@@ -57,12 +67,12 @@ impl Chunk {
     }
 
     pub fn write_constant(&mut self, val: f64) -> usize {
-        self.constants.push(val);
+        self.constants.push(Value::from(val));
         self.constants.len() - 1
     }
 
     pub fn write_variable(&mut self, val: f64) -> usize {
-        self.variables.push(val);
+        self.variables.push(Value::from(val));
         self.variables.len() - 1
     }
 
@@ -82,6 +92,22 @@ impl Chunk {
                 writeln!(f, "{instruction}")?;
                 return Ok(1);
             }
+            OpCode::OpAdd => {
+                writeln!(f, "{instruction}")?;
+                return Ok(1);
+            }
+            OpCode::OpSubtract => {
+                writeln!(f, "{instruction}")?;
+                return Ok(1);
+            }
+            OpCode::OpMultiply => {
+                writeln!(f, "{instruction}")?;
+                return Ok(1);
+            }
+            OpCode::OpDivide | OpCode::OpNegate => {
+                writeln!(f, "{instruction}")?;
+                return Ok(1);
+            }
         }
     }
 }
@@ -90,37 +116,110 @@ impl Chunk {
 pub struct VM {
     chunk: Chunk,
     ip: usize,
+    stack: Vec<Value>,
 }
 
 impl VM {
     pub fn new(chunk: Chunk) -> Self {
-        Self { chunk, ip: 0 }
+        Self {
+            chunk,
+            ip: 0,
+            stack: Vec::new(),
+        }
     }
 
     pub fn interpret(&mut self) -> Result<(), String> {
-        loop {
-            let instruction = OpCode::try_from(self.chunk.code[self.ip])
-                .map_err(|_| String::from("Invalid instruction decode"))?;
+        let mut fetch_inst = || {
+            let c = self.chunk.code[self.ip];
             self.ip += 1;
+            c
+        };
+        loop {
+            let instruction = OpCode::try_from(fetch_inst())
+                .map_err(|_| String::from("Invalid instruction decode"))?;
             match instruction {
                 OpCode::Return => return Ok(()),
-                _ => continue,
+                OpCode::Constant => {
+                    let const_id = fetch_inst() as usize;
+                    self.stack.push(self.chunk.constants[const_id].clone());
+                }
+                OpCode::OpAdd => {
+                    let b = self.stack.pop().expect("Malformed stack - empty?");
+                    let a = self.stack.pop().expect("Malformed stack - empty?");
+                    let result = (a + b).map_err(|_| "Runtime error: type mismatch")?;
+                    self.stack.push(result);
+                }
+                OpCode::OpSubtract => {
+                    let b = self.stack.pop().expect("Malformed stack - empty?");
+                    let a = self.stack.pop().expect("Malformed stack - empty?");
+                    let result = (a - b).map_err(|_| "Runtime error: type mismatch")?;
+                    self.stack.push(result);
+                }
+                OpCode::OpMultiply => {
+                    let b = self.stack.pop().expect("Malformed stack - empty?");
+                    let a = self.stack.pop().expect("Malformed stack - empty?");
+                    let result = (a * b).map_err(|_| "Runtime error: type mismatch")?;
+                    self.stack.push(result);
+                }
+                OpCode::OpDivide => {
+                    let b = self.stack.pop().expect("Malformed stack - empty?");
+                    let a = self.stack.pop().expect("Malformed stack - empty?");
+                    let result = (a / b).map_err(|_| "Runtime error: type mismatch")?;
+                    self.stack.push(result);
+                }
+                OpCode::OpNegate => {
+                    let a = self.stack.pop().expect("Malformed stack - empty?");
+                    self.stack.push((-a).map_err(|_| "Type mismatch")?);
+                }
+                OpCode::Print => todo!(),
             }
         }
-        Ok(())
     }
 }
 
 #[test]
 fn tests() {
-    let mut chunk = Chunk::new("test bytes");
-    let id = chunk.write_constant(1.25);
-    chunk.emit(OpCode::Constant);
-    chunk.emit(id as u8);
-    chunk.emit(OpCode::Return);
-    let output = format!("{:?}", chunk);
-    let mut dissassembled = output.lines();
-    assert_eq!(dissassembled.next(), Some("=== test bytes ==="));
-    assert_eq!(dissassembled.next(), Some("0001 - Const 0 (1.25)"));
-    assert_eq!(dissassembled.next(), Some("0003 - Return"));
+    {
+        let mut chunk = Chunk::new("test bytes 1");
+
+        let id = chunk.write_constant(1.25);
+        chunk.emit(OpCode::Constant);
+        chunk.emit(id as u8);
+        chunk.emit(OpCode::Return);
+
+        let output = format!("{:?}", chunk);
+        let mut dissassembled = output.lines();
+        assert_eq!(dissassembled.next(), Some("=== test bytes 1 ==="));
+        assert_eq!(dissassembled.next(), Some("0001 - Const 0 (1.25)"));
+        assert_eq!(dissassembled.next(), Some("0003 - Return"));
+    }
+    {
+        let mut chunk = Chunk::new("test bytes 2");
+
+        // - ((1.25 + 3.5) / 5.75)
+        let id = chunk.write_constant(1.25);
+        chunk.emit(OpCode::Constant);
+        chunk.emit(id as u8);
+        let id = chunk.write_constant(3.5);
+        chunk.emit(OpCode::Constant);
+        chunk.emit(id as u8);
+        chunk.emit(OpCode::OpAdd);
+        let id = chunk.write_constant(5.75);
+        chunk.emit(OpCode::Constant);
+        chunk.emit(id as u8);
+        chunk.emit(OpCode::OpDivide);
+        chunk.emit(OpCode::OpNegate);
+        chunk.emit(OpCode::Return);
+
+        let output = format!("{:?}", chunk);
+        let mut dissassembled = output.lines();
+        assert_eq!(dissassembled.next(), Some("=== test bytes 2 ==="));
+        assert_eq!(dissassembled.next(), Some("0001 - Const 0 (1.25)"));
+        assert_eq!(dissassembled.next(), Some("0003 - Const 1 (3.5)"));
+        assert_eq!(dissassembled.next(), Some("0005 - Add"));
+        assert_eq!(dissassembled.next(), Some("0006 - Const 2 (5.75)"));
+        assert_eq!(dissassembled.next(), Some("0008 - Div"));
+        assert_eq!(dissassembled.next(), Some("0009 - Neg"));
+        assert_eq!(dissassembled.next(), Some("0010 - Return"));
+    }
 }
