@@ -1,18 +1,5 @@
+use crate::error::Error;
 use std::fmt;
-
-#[derive(Debug, Clone)]
-pub enum LexerError {
-    UnterminatedQuote,
-    UnexpectedChar(char),
-    EmptyInput,
-}
-
-impl fmt::Display for LexerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO Better reporting
-        write!(f, "Lexer error")
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
@@ -54,8 +41,6 @@ pub enum TokenKind {
     True,
     Var,
     While,
-    // Special
-    Error,
     Eof,
 }
 
@@ -63,15 +48,15 @@ pub enum TokenKind {
 pub struct Token<'de> {
     pub kind: TokenKind,
     pub lexeme: &'de str,
-    pub lineno: usize,
-    pub columnno: usize,
+    pub line: usize,
+    pub column: usize,
 }
 
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lexeme = self.lexeme;
-        let line = self.lineno;
-        let column = self.columnno;
+        let line = self.line;
+        let column = self.column;
         match self.kind {
             TokenKind::LeftParen => write!(f, "LEFT_PAREN <{line}, {column}> {lexeme}"),
             TokenKind::RightParen => write!(f, "RIGHT_PAREN <{line}, {column}> {lexeme}"),
@@ -111,7 +96,6 @@ impl fmt::Display for Token<'_> {
             TokenKind::True => write!(f, "TRUE <{line}, {column}> {lexeme}"),
             TokenKind::Var => write!(f, "VAR <{line}, {column}> {lexeme}"),
             TokenKind::While => write!(f, "WHILE <{line}, {column}> {lexeme}"),
-            TokenKind::Error => write!(f, "ERROR <{line}, {column}> {lexeme}"),
             TokenKind::Eof => write!(f, "EOF <{line}, {column}> {lexeme}"),
         }
     }
@@ -119,9 +103,9 @@ impl fmt::Display for Token<'_> {
 
 pub struct Lexer<'a> {
     rest: &'a str,
-    peeked: Option<Result<Token<'a>, LexerError>>,
-    lineno: usize,
-    columnno: usize,
+    peeked: Option<Result<Token<'a>, Error>>,
+    line: usize,
+    column: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -129,14 +113,34 @@ impl<'a> Lexer<'a> {
         Lexer {
             rest: input,
             peeked: None,
-            lineno: 1,
-            columnno: 1,
+            line: 1,
+            column: 1,
         }
+    }
+
+    // Emits the specified token and updates the lexer state.
+    fn emit_token(
+        &mut self,
+        token_start: &'a str,
+        rest: &'a str,
+        kind: TokenKind,
+    ) -> Option<Result<Token<'a>, Error>> {
+        self.rest = rest;
+        let consumed_len = token_start.len() - self.rest.len();
+        let column = self.column;
+        self.column += consumed_len;
+        let lexeme = &token_start[..consumed_len];
+        Some(Ok(Token {
+            kind,
+            lexeme,
+            line: self.line,
+            column,
+        }))
     }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<Token<'a>, LexerError>;
+    type Item = Result<Token<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(next) = self.peeked.take() {
@@ -145,110 +149,106 @@ impl<'a> Iterator for Lexer<'a> {
         loop {
             let token_start = self.rest;
             let mut chars = self.rest.chars();
-            let c = chars.next()?;
-            let c_str = &self.rest[..c.len_utf8()];
 
-            // Update rest.
-            self.rest = chars.as_str();
-
-            // Detect the start of a multi-character Token.
+            // Signal if started reading a multi-character token.
             enum Started {
                 Slash,
                 String,
                 Number,
                 Ident,
-                IfEqualElse(TokenKind, TokenKind),
             }
 
-            let mut just = |kind: TokenKind| {
-                let columnno = self.columnno;
-                self.columnno += c.len_utf8();
-                Some(Ok(Token {
-                    kind,
-                    lexeme: c_str,
-                    lineno: self.lineno,
-                    columnno,
-                }))
-            };
-
-            let started = match c {
-                '(' => return just(TokenKind::LeftParen),
-                ')' => return just(TokenKind::RightParen),
-                '{' => return just(TokenKind::LeftBrace),
-                '}' => return just(TokenKind::RightBrace),
-                ',' => return just(TokenKind::Comma),
-                '.' => return just(TokenKind::Dot),
-                '-' => return just(TokenKind::Minus),
-                '+' => return just(TokenKind::Plus),
-                ';' => return just(TokenKind::Semicolon),
-                '*' => return just(TokenKind::Star),
+            let next_char = chars.next()?;
+            let started = match next_char {
+                '(' => return self.emit_token(token_start, chars.as_str(), TokenKind::LeftParen),
+                ')' => return self.emit_token(token_start, chars.as_str(), TokenKind::RightParen),
+                '{' => return self.emit_token(token_start, chars.as_str(), TokenKind::LeftBrace),
+                '}' => return self.emit_token(token_start, chars.as_str(), TokenKind::RightBrace),
+                ',' => return self.emit_token(token_start, chars.as_str(), TokenKind::Comma),
+                '.' => return self.emit_token(token_start, chars.as_str(), TokenKind::Dot),
+                '-' => return self.emit_token(token_start, chars.as_str(), TokenKind::Minus),
+                '+' => return self.emit_token(token_start, chars.as_str(), TokenKind::Plus),
+                ';' => return self.emit_token(token_start, chars.as_str(), TokenKind::Semicolon),
+                '*' => return self.emit_token(token_start, chars.as_str(), TokenKind::Star),
                 '/' => Started::Slash,
-                '<' => Started::IfEqualElse(TokenKind::LessEqual, TokenKind::Less),
-                '>' => Started::IfEqualElse(TokenKind::GreaterEqual, TokenKind::Greater),
-                '!' => Started::IfEqualElse(TokenKind::BangEqual, TokenKind::Bang),
-                '=' => Started::IfEqualElse(TokenKind::EqualEqual, TokenKind::Equal),
                 '"' => Started::String,
+                '<' => {
+                    if chars.as_str().starts_with('=') {
+                        chars.next();
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::LessEqual);
+                    } else {
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::Less);
+                    }
+                }
+                '>' => {
+                    if chars.as_str().starts_with('=') {
+                        chars.next();
+                        return self.emit_token(
+                            token_start,
+                            chars.as_str(),
+                            TokenKind::GreaterEqual,
+                        );
+                    } else {
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::Greater);
+                    }
+                }
+                '!' => {
+                    if chars.as_str().starts_with('=') {
+                        chars.next();
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::BangEqual);
+                    } else {
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::Bang);
+                    }
+                }
+                '=' => {
+                    if chars.as_str().starts_with('=') {
+                        chars.next();
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::EqualEqual);
+                    } else {
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::Equal);
+                    }
+                }
                 '0'..='9' => Started::Number,
                 'a'..='z' | 'A'..='Z' | '_' => Started::Ident,
                 c if c == '\n' => {
-                    self.lineno += 1;
-                    self.columnno = 1;
+                    self.line += 1;
+                    self.column = 1;
+                    self.rest = chars.as_str();
                     continue;
                 }
                 c if c.is_whitespace() => {
-                    self.columnno += c.len_utf8();
+                    self.column += c.len_utf8();
+                    self.rest = chars.as_str();
                     continue;
                 }
-                c => return Some(Err(LexerError::UnexpectedChar(c))),
+                c => return Some(Err(Error::LexerError(format!("unexpected char {c}")))),
             };
 
-            break match started {
+            match started {
                 Started::String => {
-                    if let Some(end) = self.rest.find('"') {
-                        let lexeme = &token_start[..end + 1 + 1];
-                        self.rest = &self.rest[end + 1..];
-                        let columnno = self.columnno;
-                        self.columnno += lexeme.len();
-                        Some(Ok(Token {
-                            lexeme,
-                            kind: TokenKind::String,
-                            lineno: self.lineno,
-                            columnno,
-                        }))
+                    if let Some(_end) = chars.find(|&c| c == '"') {
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::String);
                     } else {
-                        // swallow the remainder of input as being a string
-                        self.rest = &self.rest[self.rest.len()..];
-                        return Some(Err(LexerError::UnterminatedQuote));
+                        return Some(Err(Error::LexerError("unterminated quote".into())));
                     }
                 }
                 Started::Slash => {
-                    if self.rest.starts_with('/') {
+                    if chars.as_str().starts_with('/') {
                         // This is a comment!
-                        let line_end = self.rest.find('\n').unwrap_or_else(|| self.rest.len());
-                        self.rest = &self.rest[line_end..];
-                        self.lineno += 1;
-                        self.columnno = 1;
+                        let _line_end = chars.find(|&c| c == '\n');
+                        self.rest = chars.as_str();
+                        self.line += 1;
+                        self.column = 1;
                         continue;
                     } else {
-                        let columnno = self.columnno;
-                        self.columnno += 1;
-                        Some(Ok(Token {
-                            lexeme: c_str,
-                            kind: TokenKind::Slash,
-                            lineno: self.lineno,
-                            columnno,
-                        }))
+                        return self.emit_token(token_start, chars.as_str(), TokenKind::Slash);
                     }
                 }
                 Started::Ident => {
                     let first_non_ident = token_start
                         .find(|c| !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'))
                         .unwrap_or_else(|| token_start.len());
-
                     let lexeme = &token_start[..first_non_ident];
-                    let extra_bytes = lexeme.len() - c.len_utf8();
-                    self.rest = &self.rest[extra_bytes..];
-
                     let kind = match lexeme {
                         "and" => TokenKind::And,
                         "class" => TokenKind::Class,
@@ -268,71 +268,41 @@ impl<'a> Iterator for Lexer<'a> {
                         "while" => TokenKind::While,
                         _ => TokenKind::Ident,
                     };
-                    let columnno = self.columnno;
-                    self.columnno += lexeme.len();
+                    let column = self.column;
+                    self.column += lexeme.len();
+                    self.rest = &token_start[first_non_ident..];
                     return Some(Ok(Token {
                         lexeme,
                         kind,
-                        lineno: self.lineno,
-                        columnno,
+                        line: self.line,
+                        column,
                     }));
                 }
                 Started::Number => {
                     let first_non_digit = token_start
                         .find(|c| !matches!(c, '.' | '0'..='9'))
                         .unwrap_or_else(|| token_start.len());
-
-                    let mut lexeme = &token_start[..first_non_digit];
-                    let mut dotted = lexeme.splitn(3, '.');
-                    match (dotted.next(), dotted.next(), dotted.next()) {
-                        (Some(one), Some(two), Some(_)) => {
-                            lexeme = &lexeme[..one.len() + 1 + two.len()];
-                        }
-                        (Some(one), Some(two), None) if two.is_empty() => {
-                            lexeme = &lexeme[..one.len()];
-                        }
-                        _ => {
-                            // leave literal as-is
-                        }
-                    }
-                    let extra_bytes = lexeme.len() - c.len_utf8();
-                    self.rest = &self.rest[extra_bytes..];
-
-                    let columnno = self.columnno;
-                    self.columnno += lexeme.len();
-                    return Some(Ok(Token {
-                        lexeme,
-                        kind: TokenKind::Number,
-                        lineno: self.lineno,
-                        columnno,
-                    }));
-                }
-                Started::IfEqualElse(yes, no) => {
-                    self.rest = self.rest.trim_start();
-                    let trimmed = token_start.len() - self.rest.len() - 1;
-                    if self.rest.starts_with('=') {
-                        let span = &token_start[..c.len_utf8() + trimmed + 1];
-                        self.rest = &self.rest[1..];
-                        let columnno = self.columnno;
-                        self.columnno += 2;
-                        Some(Ok(Token {
-                            lexeme: span,
-                            kind: yes,
-                            lineno: self.lineno,
-                            columnno,
-                        }))
-                    } else {
-                        let columnno = self.columnno;
-                        self.columnno += 1;
-                        Some(Ok(Token {
-                            lexeme: c_str,
-                            kind: no,
-                            lineno: self.lineno,
-                            columnno,
-                        }))
-                    }
+                    return self.emit_token(
+                        token_start,
+                        &token_start[first_non_digit..],
+                        TokenKind::Number,
+                    );
                 }
             };
         }
+    }
+}
+
+#[test]
+fn test_lexer() {
+    let test_input = include_str!("../programs/binary_trees.lox");
+    let test_output = include_str!("../programs/binary_trees.tokens.txt");
+    let mut expected_lins = test_output.lines();
+
+    let lexer = Lexer::new(test_input);
+    let tokens: Result<Vec<_>, Error> = lexer.collect();
+    assert!(tokens.is_ok());
+    for token in tokens.unwrap() {
+        assert_eq!(Some(token.to_string().as_str()), expected_lins.next());
     }
 }

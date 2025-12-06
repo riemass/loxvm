@@ -1,11 +1,9 @@
 use crate::{
     Lexer,
-    lex::{LexerError, Token, TokenKind},
+    lex::{Token, TokenKind},
 };
 
 pub mod ast {
-
-    use crate::lex::Token;
     use std::fmt;
 
     pub struct Statement {}
@@ -68,15 +66,15 @@ fn prefix_binding_power(kind: TokenKind) -> u8 {
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
         let lexer = Lexer::new(input);
-        let tokens: Result<Vec<_>, LexerError> = lexer.collect();
+        let tokens: Result<Vec<_>, crate::error::Error> = lexer.collect();
         // TODO: Propagate errors.
         let mut tokens = tokens.unwrap();
         // TODO: Append Eof token in Lexer, with sane line and column.
         tokens.push(Token {
             kind: TokenKind::Eof,
             lexeme: "",
-            lineno: 0,
-            columnno: 0,
+            line: 0,
+            column: 0,
         });
         Self {
             tokens: tokens,

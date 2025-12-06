@@ -1,3 +1,4 @@
+pub mod error;
 pub mod lex;
 pub use lex::Lexer;
 
