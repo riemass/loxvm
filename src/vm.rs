@@ -1,4 +1,5 @@
 use crate::Value;
+use crate::error::Error;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::fmt::Display;
 
@@ -128,7 +129,7 @@ impl VM {
         }
     }
 
-    pub fn interpret(&mut self) -> Result<(), String> {
+    pub fn interpret(&mut self) -> Result<(), Error> {
         let mut fetch_inst = || {
             let c = self.chunk.code[self.ip];
             self.ip += 1;
@@ -136,7 +137,7 @@ impl VM {
         };
         loop {
             let instruction = OpCode::try_from(fetch_inst())
-                .map_err(|_| String::from("Invalid instruction decode"))?;
+                .map_err(|_| Error::RuntimeError("Invalid instruction".into()))?;
             match instruction {
                 OpCode::Return => return Ok(()),
                 OpCode::Constant => {
@@ -144,32 +145,47 @@ impl VM {
                     self.stack.push(self.chunk.constants[const_id].clone());
                 }
                 OpCode::OpAdd => {
-                    let b = self.stack.pop().expect("Malformed stack - empty?");
-                    let a = self.stack.pop().expect("Malformed stack - empty?");
-                    let result = (a + b).map_err(|_| "Runtime error: type mismatch")?;
-                    self.stack.push(result);
+                    if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
+                        let result = (a + b)?;
+                        self.stack.push(result);
+                    } else {
+                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                    }
                 }
                 OpCode::OpSubtract => {
-                    let b = self.stack.pop().expect("Malformed stack - empty?");
-                    let a = self.stack.pop().expect("Malformed stack - empty?");
-                    let result = (a - b).map_err(|_| "Runtime error: type mismatch")?;
-                    self.stack.push(result);
+                    if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
+                        let result = (a - b)?;
+                        self.stack.push(result);
+                    } else {
+                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                    }
                 }
                 OpCode::OpMultiply => {
-                    let b = self.stack.pop().expect("Malformed stack - empty?");
-                    let a = self.stack.pop().expect("Malformed stack - empty?");
-                    let result = (a * b).map_err(|_| "Runtime error: type mismatch")?;
-                    self.stack.push(result);
+                    if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
+                        let result = (a * b)?;
+                        self.stack.push(result);
+                    } else {
+                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                    }
                 }
                 OpCode::OpDivide => {
-                    let b = self.stack.pop().expect("Malformed stack - empty?");
-                    let a = self.stack.pop().expect("Malformed stack - empty?");
-                    let result = (a / b).map_err(|_| "Runtime error: type mismatch")?;
-                    self.stack.push(result);
+                    if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
+                        let result = (a / b)?;
+                        self.stack.push(result);
+                    } else {
+                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                    }
                 }
                 OpCode::OpNegate => {
-                    let a = self.stack.pop().expect("Malformed stack - empty?");
-                    self.stack.push((-a).map_err(|_| "Type mismatch")?);
+                    // TODO: Examine this code.
+                    // if let Some(a) = self.stack.last_mut() {
+                    //     *a = (-a)?;
+                    // }
+                    if let Some(a) = self.stack.pop() {
+                        self.stack.push((-a)?);
+                    } else {
+                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                    }
                 }
                 OpCode::Print => todo!(),
             }

@@ -1,45 +1,15 @@
 use crate::{
-    Lexer,
+    Lexer, ast,
+    error::Error,
     lex::{Token, TokenKind},
 };
-
-pub mod ast {
-    use std::fmt;
-
-    pub struct Statement {}
-
-    pub enum ExpressionTree {
-        Number(u32),
-        Identifier(String),
-        Unary(String, Box<ExpressionTree>),
-        Binary(String, Box<(ExpressionTree, ExpressionTree)>),
-    }
-
-    impl fmt::Display for ExpressionTree {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            match self {
-                ExpressionTree::Number(x) => write!(f, "{}", x),
-                ExpressionTree::Identifier(id) => write!(f, "{}", id),
-                ExpressionTree::Unary(token, operand) => {
-                    write!(f, "({} {})", token, operand)
-                }
-                ExpressionTree::Binary(token, operands) => {
-                    write!(f, "({} {} {})", token, operands.0, operands.1)
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParseError {}
 
 pub struct Parser<'a> {
     tokens: Vec<Token<'a>>,
     current: usize,
 }
 
-type ParseResult<'a> = Result<ast::ExpressionTree, ParseError>;
+type ParseResult<'a> = Result<ast::ExpressionTree, Error>;
 
 fn infix_binding_power(kind: TokenKind) -> Option<(u8, u8)> {
     match kind {
@@ -128,33 +98,37 @@ impl<'a> Parser<'a> {
         todo!("Parse statement");
     }
 
-    pub fn expression(&mut self) -> ast::ExpressionTree {
+    pub fn expression(&mut self) -> Result<ast::ExpressionTree, Error> {
         self.expr_bp(0)
     }
 
-    fn expr_bp(&mut self, min_bp: u8) -> ast::ExpressionTree {
+    fn expr_bp(&mut self, min_bp: u8) -> Result<ast::ExpressionTree, Error> {
         let mut lhs = match self.peek().kind {
-            TokenKind::Number => ast::ExpressionTree::Number(
-                self.next()
-                    .lexeme
-                    .parse()
-                    .expect("Lexer validated number failed to parse"),
-            ),
+            TokenKind::Number => {
+                let val: f64 = self.next().lexeme.parse().map_err(|_| {
+                    Error::ParserError("floating point number failed to parse".into())
+                })?;
+                ast::ExpressionTree::Number(val)
+            }
             TokenKind::Ident => ast::ExpressionTree::Identifier(self.next().lexeme.into()),
             TokenKind::Plus | TokenKind::Minus => {
                 let tok = self.next();
                 let bp = prefix_binding_power(tok.kind);
-                ast::ExpressionTree::Unary(tok.lexeme.into(), Box::new(self.expr_bp(bp)))
+                ast::ExpressionTree::Unary(tok.lexeme.into(), Box::new(self.expr_bp(bp)?))
             }
             TokenKind::LeftParen => {
                 self.advance();
-                let lhs = self.expr_bp(0);
-                // TODO: Handle errors better.
-                self.expect(TokenKind::RightParen)
-                    .expect("RightParen should follow in expression");
+                let lhs = self.expr_bp(0)?;
+                if let None = self.expect(TokenKind::RightParen) {
+                    return Err(Error::ParserError(
+                        "expected RightParen in expression".into(),
+                    ));
+                }
                 lhs
             }
-            t => panic!("bad token: {:?}", t),
+            t => {
+                return Err(Error::ParserError(format!("unexpected token - {:?}", t)));
+            }
         };
         loop {
             let op = match self.peek().kind {
@@ -163,10 +137,12 @@ impl<'a> Parser<'a> {
                 TokenKind::Minus => TokenKind::Minus,
                 TokenKind::Star => TokenKind::Star,
                 TokenKind::Slash => TokenKind::Slash,
-                // Can follow expression, not an error but also not a classic op
+                // Can follow expression, not an error but also not an operator.
                 TokenKind::RightParen => TokenKind::RightParen,
-                // All other tokes - error
-                _ => panic!("bad token: {:?}", self.peek()),
+                // All other tokes - error.
+                t => {
+                    return Err(Error::ParserError(format!("unexpected token - {:?}", t)));
+                }
             };
             if let Some((l_bp, r_bp)) = infix_binding_power(op) {
                 if l_bp < min_bp {
@@ -175,13 +151,13 @@ impl<'a> Parser<'a> {
                 // TODO: refactor operator to string properly.
                 let s = self.peek().lexeme.to_owned();
                 self.advance();
-                let rhs = self.expr_bp(r_bp);
+                let rhs = self.expr_bp(r_bp)?;
                 lhs = ast::ExpressionTree::Binary(s, Box::new((lhs, rhs)));
                 continue;
             }
             break;
         }
-        lhs
+        Ok(lhs)
     }
 }
 
@@ -189,7 +165,7 @@ impl<'a> Parser<'a> {
 fn tests() {
     fn parse_expr(s: &str) -> ast::ExpressionTree {
         let mut parser = Parser::new(s);
-        parser.expression()
+        parser.expression().expect("failed to parse input")
     }
 
     let s = parse_expr("1");
