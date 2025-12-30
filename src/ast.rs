@@ -1,25 +1,43 @@
 use std::fmt;
 
-pub struct Statement {}
-
-pub enum ExpressionTree {
-    Number(f64),
-    Identifier(String),
-    Unary(String, Box<ExpressionTree>),
-    Binary(String, Box<(ExpressionTree, ExpressionTree)>),
+pub enum Statement {
+    Expression(ExpressionStmt),
+    For,
+    If,
+    Print(PrintStmt),
+    Return,
+    While,
+    Block,
 }
 
-impl fmt::Display for ExpressionTree {
+pub enum ExpressionStmt {
+    Number(f64),
+    Identifier(String),
+    Unary(String, Box<ExpressionStmt>),
+    Binary(String, Box<(ExpressionStmt, ExpressionStmt)>),
+}
+
+impl fmt::Display for ExpressionStmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExpressionTree::Number(x) => write!(f, "{}", x),
-            ExpressionTree::Identifier(id) => write!(f, "{}", id),
-            ExpressionTree::Unary(token, operand) => {
+            ExpressionStmt::Number(x) => write!(f, "{}", x),
+            ExpressionStmt::Identifier(id) => write!(f, "{}", id),
+            ExpressionStmt::Unary(token, operand) => {
                 write!(f, "({} {})", token, operand)
             }
-            ExpressionTree::Binary(token, operands) => {
+            ExpressionStmt::Binary(token, operands) => {
                 write!(f, "({} {} {})", token, operands.0, operands.1)
             }
         }
+    }
+}
+
+pub struct PrintStmt {
+    pub expr: ExpressionStmt,
+}
+
+impl fmt::Display for PrintStmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(print {})", self.expr)
     }
 }

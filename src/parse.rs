@@ -9,7 +9,7 @@ pub struct Parser<'a> {
     current: usize,
 }
 
-type ParseResult<'a> = Result<ast::ExpressionTree, Error>;
+type ParseResult<T> = Result<T, Error>;
 
 fn infix_binding_power(kind: TokenKind) -> Option<(u8, u8)> {
     match kind {
@@ -39,12 +39,12 @@ impl<'a> Parser<'a> {
         let tokens: Result<Vec<_>, crate::error::Error> = lexer.collect();
         // TODO: Propagate errors.
         let mut tokens = tokens.unwrap();
-        // TODO: Append Eof token in Lexer, with sane line and column.
         tokens.push(Token {
             kind: TokenKind::Eof,
             lexeme: "",
-            line: 0,
-            column: 0,
+            // TODO: Fix Eof tokens line and column.
+            line: tokens.last().map(|t| t.line).unwrap_or(0),
+            column: tokens.last().map(|t| t.column).unwrap_or(0),
         });
         Self {
             tokens: tokens,
@@ -52,13 +52,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn peek(&self) -> &Token<'_> {
+    fn peek(&self) -> &Token<'_> {
         self.tokens
             .get(self.current)
             .expect("Iteration past the end")
     }
 
-    pub fn advance(&mut self) {
+    fn advance(&mut self) {
         // Note: Doesn't advance the current token past Eof. Since Eof is mandatory
         // we can safely unwrap the get call.
         if self.tokens.get(self.current).unwrap().kind != TokenKind::Eof {
@@ -66,18 +66,18 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn next(&mut self) -> &Token<'_> {
+    fn next(&mut self) -> &Token<'_> {
         self.advance();
         self.tokens
             .get(self.current - 1)
             .expect("Iteration past the end")
     }
 
-    pub fn check(&self, kind: TokenKind) -> bool {
+    fn check(&self, kind: TokenKind) -> bool {
         return self.peek().kind == kind;
     }
 
-    pub fn expect(&mut self, kind: TokenKind) -> Option<&Token<'a>> {
+    fn expect(&mut self, kind: TokenKind) -> Option<&Token<'a>> {
         if self.check(kind) {
             let tok = self.tokens.get(self.current);
             // Note: Doesn't advance the current token past Eof. Since Eof is mandatory
@@ -90,35 +90,46 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn statements(&mut self) -> Vec<ast::Statement> {
-        todo!("Parse statements");
-    }
-
-    fn statement(&mut self) -> ast::Statement {
+    pub fn statements(&mut self) -> Vec<ast::Statement> {
         todo!("Parse statement");
     }
 
-    pub fn expression(&mut self) -> Result<ast::ExpressionTree, Error> {
-        self.expr_bp(0)
+    pub fn statement(&mut self) -> Result<ast::Statement, Error> {
+        match self.peek().kind {
+            TokenKind::If => self.if_statement(),
+            TokenKind::For => self.for_statement(),
+            TokenKind::Print => self.print_statement(),
+            TokenKind::Return => todo!(),
+            TokenKind::While => self.while_statement(),
+            TokenKind::LeftBrace => self.group_statement(),
+            _ => Ok(ast::Statement::Expression(self.expression()?)),
+        }
     }
 
-    fn expr_bp(&mut self, min_bp: u8) -> Result<ast::ExpressionTree, Error> {
+    pub fn expression(&mut self) -> ParseResult<ast::ExpressionStmt> {
+        self.expr_with_binding_power(0)
+    }
+
+    fn expr_with_binding_power(&mut self, min_bp: u8) -> ParseResult<ast::ExpressionStmt> {
         let mut lhs = match self.peek().kind {
             TokenKind::Number => {
                 let val: f64 = self.next().lexeme.parse().map_err(|_| {
                     Error::ParserError("floating point number failed to parse".into())
                 })?;
-                ast::ExpressionTree::Number(val)
+                ast::ExpressionStmt::Number(val)
             }
-            TokenKind::Ident => ast::ExpressionTree::Identifier(self.next().lexeme.into()),
+            TokenKind::Ident => ast::ExpressionStmt::Identifier(self.next().lexeme.into()),
             TokenKind::Plus | TokenKind::Minus => {
                 let tok = self.next();
                 let bp = prefix_binding_power(tok.kind);
-                ast::ExpressionTree::Unary(tok.lexeme.into(), Box::new(self.expr_bp(bp)?))
+                ast::ExpressionStmt::Unary(
+                    tok.lexeme.into(),
+                    Box::new(self.expr_with_binding_power(bp)?),
+                )
             }
             TokenKind::LeftParen => {
                 self.advance();
-                let lhs = self.expr_bp(0)?;
+                let lhs = self.expr_with_binding_power(0)?;
                 if let None = self.expect(TokenKind::RightParen) {
                     return Err(Error::ParserError(
                         "expected RightParen in expression".into(),
@@ -151,19 +162,42 @@ impl<'a> Parser<'a> {
                 // TODO: refactor operator to string properly.
                 let s = self.peek().lexeme.to_owned();
                 self.advance();
-                let rhs = self.expr_bp(r_bp)?;
-                lhs = ast::ExpressionTree::Binary(s, Box::new((lhs, rhs)));
+                let rhs = self.expr_with_binding_power(r_bp)?;
+                lhs = ast::ExpressionStmt::Binary(s, Box::new((lhs, rhs)));
                 continue;
             }
             break;
         }
         Ok(lhs)
     }
+
+    fn print_statement(&mut self) -> ParseResult<ast::Statement> {
+        // Advance print kw matched in caller.
+        self.advance();
+        let expr = self.expression()?;
+        Ok(ast::Statement::Print(ast::PrintStmt { expr }))
+    }
+
+    fn if_statement(&self) -> ParseResult<ast::Statement> {
+        todo!()
+    }
+
+    fn for_statement(&self) -> ParseResult<ast::Statement> {
+        todo!()
+    }
+
+    fn while_statement(&self) -> ParseResult<ast::Statement> {
+        todo!()
+    }
+
+    fn group_statement(&self) -> ParseResult<ast::Statement> {
+        todo!()
+    }
 }
 
 #[test]
 fn tests() {
-    fn parse_expr(s: &str) -> ast::ExpressionTree {
+    fn parse_expr(s: &str) -> ast::ExpressionStmt {
         let mut parser = Parser::new(s);
         parser.expression().expect("failed to parse input")
     }
