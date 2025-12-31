@@ -69,7 +69,7 @@ fn compile_print_expression(chunk: &mut vm::Chunk, print_stmt: &ast::PrintStmt) 
 #[test]
 fn tests() {
     {
-        let input = "1.25";
+        let input = "1.25;";
         let mut parser = crate::Parser::new(input);
         let stmt = parser.statement().unwrap();
         let chunk = compile(&stmt);
@@ -80,7 +80,7 @@ fn tests() {
         assert_eq!(dissassembled.next(), Some("0001 - Const 0 (1.25)"));
     }
     {
-        let input = "-((1.25 + 3.5) / 5.75)";
+        let input = "-((1.25 + 3.5) / 5.75);";
         let mut parser = crate::Parser::new(input);
         let stmt = parser.statement().unwrap();
         let chunk = compile(&stmt);

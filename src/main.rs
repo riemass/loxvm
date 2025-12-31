@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use loxemu::Lexer;
+use loxemu::{Lexer, compiler, vm};
 use std::fs;
 use std::path::PathBuf;
 
@@ -35,7 +35,20 @@ fn main() -> Result<(), std::io::Error> {
             let expr = parser.expression().expect("Failed to parse expreesion");
             println!("{expr}");
         }
-        Commands::Run { filename } => todo!(),
+        Commands::Run { filename } => {
+            // TODO: Implement eval loop
+            let file_contents = fs::read_to_string(filename)?;
+            let mut parser = loxemu::Parser::new(&file_contents);
+            let stmt = parser.statement().expect("Failed to parse expreesion");
+            let mut chunk = compiler::compile(&stmt);
+            // TODO: Manually appending Return. Fix when complete.
+            chunk.emit(vm::OpCode::Return);
+            let mut vm = vm::VM::new(chunk);
+            vm.interpret().unwrap();
+            if vm.stack.len() == 1 {
+                println!("Top of the stack: {:?}", vm.stack.first());
+            }
+        }
     }
 
     Ok(())

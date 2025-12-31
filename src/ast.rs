@@ -2,6 +2,7 @@ use std::fmt;
 
 pub enum Statement {
     Expression(ExpressionStmt),
+    VarDeclaration(String, Option<ExpressionStmt>),
     For,
     If,
     Print(PrintStmt),

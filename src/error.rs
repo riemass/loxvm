@@ -59,17 +59,12 @@ impl Error {
         }
     }
 
-    pub fn unexpected_token(
-        expected: Option<TokenKind>,
-        found: TokenKind,
-        line: usize,
-        column: usize,
-    ) -> Self {
+    pub fn unexpected_token(expected: Option<TokenKind>, token: &Token<'_>) -> Self {
         Self::UnexpectedToken {
             expected,
-            found,
-            line,
-            column,
+            found: token.kind,
+            line: token.line,
+            column: token.column,
         }
     }
 

@@ -28,7 +28,7 @@ fn infix_binding_power(kind: TokenKind) -> Option<(u8, u8)> {
 fn prefix_binding_power(kind: TokenKind) -> u8 {
     match kind {
         TokenKind::Plus | TokenKind::Minus => 51,
-        _ => panic!("Unexpected token as prefix operator: {:?}", kind),
+        _ => unreachable!(),
     }
 }
 
@@ -74,17 +74,13 @@ impl<'a> Parser<'a> {
         self.peek().kind == kind
     }
 
-    fn expect(&mut self, kind: TokenKind) -> Option<&Token<'a>> {
-        if self.check(kind) {
-            let tok = self.tokens.get(self.current);
-            // Note: Doesn't advance the current token past Eof. Since Eof is mandatory
-            // we can safely unwrap the get call.
-            if tok.unwrap().kind != TokenKind::Eof {
-                self.current += 1;
-            }
-            return tok;
+    fn expect(&mut self, kind: TokenKind) -> Result<(), Error> {
+        let current_token = self.peek();
+        if current_token.kind == kind {
+            self.advance();
+            return Ok(());
         }
-        None
+        Err(Error::unexpected_token(Some(kind), current_token))
     }
 
     pub fn statements(&mut self) -> Vec<ast::Statement> {
@@ -93,13 +89,14 @@ impl<'a> Parser<'a> {
 
     pub fn statement(&mut self) -> Result<ast::Statement, Error> {
         match self.peek().kind {
+            TokenKind::Var => self.var_declaration(),
             TokenKind::If => self.if_statement(),
             TokenKind::For => self.for_statement(),
             TokenKind::Print => self.print_statement(),
             TokenKind::Return => todo!(),
             TokenKind::While => self.while_statement(),
             TokenKind::LeftBrace => self.group_statement(),
-            _ => Ok(ast::Statement::Expression(self.expression()?)),
+            _ => self.expression_statement(),
         }
     }
 
@@ -129,45 +126,15 @@ impl<'a> Parser<'a> {
             TokenKind::LeftParen => {
                 self.advance();
                 let lhs = self.expr_with_binding_power(0)?;
-                if self.expect(TokenKind::RightParen).is_none() {
-                    return Err(Error::unexpected_token(
-                        Some(TokenKind::RightParen),
-                        self.peek().kind,
-                        self.peek().line,
-                        self.peek().column,
-                    ));
-                }
+                self.expect(TokenKind::RightParen)?;
                 lhs
             }
             _ => {
-                return Err(Error::unexpected_token(
-                    None,
-                    self.peek().kind,
-                    self.peek().line,
-                    self.peek().column,
-                ));
+                return Err(Error::unexpected_token(None, self.peek()));
             }
         };
         loop {
-            let op = match self.peek().kind {
-                TokenKind::Eof => break,
-                TokenKind::Plus => TokenKind::Plus,
-                TokenKind::Minus => TokenKind::Minus,
-                TokenKind::Star => TokenKind::Star,
-                TokenKind::Slash => TokenKind::Slash,
-                // Can follow expression, not an error but also not an operator.
-                TokenKind::RightParen => TokenKind::RightParen,
-                // All other tokes - error.
-                _ => {
-                    return Err(Error::unexpected_token(
-                        None,
-                        self.peek().kind,
-                        self.peek().line,
-                        self.peek().column,
-                    ));
-                }
-            };
-            if let Some((l_bp, r_bp)) = infix_binding_power(op) {
+            if let Some((l_bp, r_bp)) = infix_binding_power(self.peek().kind) {
                 if l_bp < min_bp {
                     break;
                 }
@@ -183,10 +150,17 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
+    fn expression_statement(&mut self) -> ParseResult<ast::Statement> {
+        let expr = self.expression()?;
+        self.expect(TokenKind::Semicolon)?;
+        Ok(ast::Statement::Expression(expr))
+    }
+
     fn print_statement(&mut self) -> ParseResult<ast::Statement> {
         // Advance print kw matched in caller.
         self.advance();
         let expr = self.expression()?;
+        self.expect(TokenKind::Semicolon)?;
         Ok(ast::Statement::Print(ast::PrintStmt { expr }))
     }
 
@@ -204,6 +178,20 @@ impl<'a> Parser<'a> {
 
     fn group_statement(&self) -> ParseResult<ast::Statement> {
         todo!()
+    }
+
+    fn var_declaration(&mut self) -> ParseResult<ast::Statement> {
+        self.advance();
+        // TODO: Refactor borrowing to unify the two lines below.
+        let name = self.peek().lexeme.to_owned();
+        self.expect(TokenKind::Ident)?;
+        let expr = if self.check(TokenKind::Equal) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.expect(TokenKind::Semicolon)?;
+        Ok(ast::Statement::VarDeclaration(name, expr))
     }
 }
 
