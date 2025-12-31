@@ -129,62 +129,74 @@ impl VM {
         }
     }
 
+    fn read_byte(&mut self) -> u8 {
+        let byte = self.chunk.code[self.ip];
+        self.ip += 1;
+        byte
+    }
+
     pub fn interpret(&mut self) -> Result<(), Error> {
-        let mut fetch_inst = || {
-            let c = self.chunk.code[self.ip];
-            self.ip += 1;
-            c
-        };
         loop {
-            let instruction = OpCode::try_from(fetch_inst())
-                .map_err(|_| Error::RuntimeError("Invalid instruction".into()))?;
+            let next_byte = self.read_byte();
+            let instruction = OpCode::try_from(next_byte)
+                .map_err(|_| Error::invalid_instruction(next_byte, self.ip - 1))?;
             match instruction {
                 OpCode::Return => return Ok(()),
                 OpCode::Constant => {
-                    let const_id = fetch_inst() as usize;
+                    let const_id = self.read_byte() as usize;
                     self.stack.push(self.chunk.constants[const_id].clone());
                 }
                 OpCode::OpAdd => {
                     if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
-                        let result = (a + b)?;
+                        let result = Value::checked_add(a, b)?;
                         self.stack.push(result);
                     } else {
-                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                        return Err(Error::stack_underflow(
+                            "Corruption while doing binary operator",
+                        ));
                     }
                 }
                 OpCode::OpSubtract => {
                     if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
-                        let result = (a - b)?;
+                        let result = Value::checked_sub(a, b)?;
                         self.stack.push(result);
                     } else {
-                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                        return Err(Error::stack_underflow(
+                            "Corruption while doing binary operator",
+                        ));
                     }
                 }
                 OpCode::OpMultiply => {
                     if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
-                        let result = (a * b)?;
+                        let result = Value::checked_mul(a, b)?;
                         self.stack.push(result);
                     } else {
-                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                        return Err(Error::stack_underflow(
+                            "Corruption while doing binary operator",
+                        ));
                     }
                 }
                 OpCode::OpDivide => {
                     if let (Some(b), Some(a)) = (self.stack.pop(), self.stack.pop()) {
-                        let result = (a / b)?;
+                        let result = Value::checked_div(a, b)?;
                         self.stack.push(result);
                     } else {
-                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                        return Err(Error::stack_underflow(
+                            "Corruption while doing binary operator",
+                        ));
                     }
                 }
                 OpCode::OpNegate => {
                     // TODO: Examine this code.
                     // if let Some(a) = self.stack.last_mut() {
-                    //     *a = (-a)?;
+                    //     *a = Value::checked_neg(*a)?;
                     // }
                     if let Some(a) = self.stack.pop() {
-                        self.stack.push((-a)?);
+                        self.stack.push(Value::checked_neg(a)?);
                     } else {
-                        return Err(Error::RuntimeError("Invalid instruction".into()));
+                        return Err(Error::stack_underflow(
+                            "Corruption while doing unary operator",
+                        ));
                     }
                 }
                 OpCode::Print => todo!(),

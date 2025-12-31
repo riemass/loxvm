@@ -27,6 +27,44 @@ impl Value {
     pub fn nil() -> Self {
         Self::Nil
     }
+
+    pub fn checked_add(self, rhs: Self) -> Result<Self, Error> {
+        match (self, rhs) {
+            (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs + rhs)),
+            (Value::String(lhs), Value::String(rhs)) => {
+                Ok(Value::String(format!("{}{}", lhs, rhs)))
+            }
+            (_, _) => Err(Error::type_error("addition", "mix of number ans string")),
+        }
+    }
+
+    pub fn checked_sub(self, rhs: Self) -> Result<Self, Error> {
+        if let (Value::Number(lhs), Value::Number(rhs)) = (self, rhs) {
+            return Ok(Value::Number(lhs - rhs));
+        }
+        Err(Error::type_error("subtraction", "non-number"))
+    }
+
+    pub fn checked_mul(self, rhs: Self) -> Result<Self, Error> {
+        if let (Value::Number(lhs), Value::Number(rhs)) = (self, rhs) {
+            return Ok(Value::Number(lhs * rhs));
+        }
+        Err(Error::type_error("multiplication", "non-number"))
+    }
+
+    pub fn checked_div(self, rhs: Self) -> Result<Self, Error> {
+        if let (Value::Number(lhs), Value::Number(rhs)) = (self, rhs) {
+            return Ok(Value::Number(lhs / rhs));
+        }
+        Err(Error::type_error("division", "non-number"))
+    }
+
+    pub fn checked_neg(self) -> Result<Self, Error> {
+        if let Value::Number(lhs) = self {
+            return Ok(Value::Number(-lhs));
+        }
+        Err(Error::type_error("negation", "non-number"))
+    }
 }
 
 impl From<bool> for Value {
@@ -38,72 +76,5 @@ impl From<bool> for Value {
 impl From<f64> for Value {
     fn from(f: f64) -> Self {
         Self::Number(f)
-    }
-}
-
-impl std::ops::Add for Value {
-    type Output = Result<Self, Error>;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Value::Number(lhs), Value::Number(rhs)) => {
-                return Ok(Value::Number(lhs + rhs));
-            }
-            (Value::String(mut lhs), Value::String(rhs)) => {
-                lhs.push_str(rhs.as_str());
-                return Ok(Value::String(lhs));
-            }
-            (_, _) => {
-                return Err(Error::RuntimeError("Unsupported types for addition".into()));
-            }
-        }
-    }
-}
-
-impl std::ops::Sub for Value {
-    type Output = Result<Self, Error>;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        if let (Value::Number(lhs), Value::Number(rhs)) = (self, rhs) {
-            return Ok(Value::Number(lhs - rhs));
-        }
-        return Err(Error::RuntimeError(
-            "Unsupported types for subtraction".into(),
-        ));
-    }
-}
-
-impl std::ops::Mul for Value {
-    type Output = Result<Self, Error>;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        if let (Value::Number(lhs), Value::Number(rhs)) = (self, rhs) {
-            return Ok(Value::Number(lhs * rhs));
-        }
-        return Err(Error::RuntimeError(
-            "Unsupported types for multiplication".into(),
-        ));
-    }
-}
-
-impl std::ops::Div for Value {
-    type Output = Result<Self, Error>;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        if let (Value::Number(lhs), Value::Number(rhs)) = (self, rhs) {
-            return Ok(Value::Number(lhs / rhs));
-        }
-        return Err(Error::RuntimeError("Unsupported types for division".into()));
-    }
-}
-
-impl std::ops::Neg for Value {
-    type Output = Result<Self, Error>;
-
-    fn neg(self) -> Self::Output {
-        if let Value::Number(lhs) = self {
-            return Ok(Value::Number(-lhs));
-        }
-        return Err(Error::RuntimeError("Unsupported types for negation".into()));
     }
 }

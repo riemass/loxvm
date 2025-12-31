@@ -221,15 +221,15 @@ impl<'a> Iterator for Lexer<'a> {
                     self.rest = chars.as_str();
                     continue;
                 }
-                c => return Some(Err(Error::LexerError(format!("unexpected char {c}")))),
+                c => return Some(Err(Error::unexpected_char(c, self.line, self.column))),
             };
 
             match started {
                 Started::String => {
-                    if let Some(_end) = chars.find(|&c| c == '"') {
+                    if let Some(_) = chars.find(|&c| c == '"') {
                         return self.emit_token(token_start, chars.as_str(), TokenKind::String);
                     } else {
-                        return Some(Err(Error::LexerError("unterminated quote".into())));
+                        return Some(Err(Error::unterminated_string(self.line, self.column)));
                     }
                 }
                 Started::Slash => {

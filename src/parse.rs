@@ -46,10 +46,7 @@ impl<'a> Parser<'a> {
             line: tokens.last().map(|t| t.line).unwrap_or(0),
             column: tokens.last().map(|t| t.column).unwrap_or(0),
         });
-        Self {
-            tokens: tokens,
-            current: 0,
-        }
+        Self { tokens, current: 0 }
     }
 
     fn peek(&self) -> &Token<'_> {
@@ -74,7 +71,7 @@ impl<'a> Parser<'a> {
     }
 
     fn check(&self, kind: TokenKind) -> bool {
-        return self.peek().kind == kind;
+        self.peek().kind == kind
     }
 
     fn expect(&mut self, kind: TokenKind) -> Option<&Token<'a>> {
@@ -113,9 +110,11 @@ impl<'a> Parser<'a> {
     fn expr_with_binding_power(&mut self, min_bp: u8) -> ParseResult<ast::ExpressionStmt> {
         let mut lhs = match self.peek().kind {
             TokenKind::Number => {
-                let val: f64 = self.next().lexeme.parse().map_err(|_| {
-                    Error::ParserError("floating point number failed to parse".into())
-                })?;
+                let current_token = self.next();
+                let val: f64 = current_token
+                    .lexeme
+                    .parse()
+                    .map_err(|_| Error::invalid_number(current_token))?;
                 ast::ExpressionStmt::Number(val)
             }
             TokenKind::Ident => ast::ExpressionStmt::Identifier(self.next().lexeme.into()),
@@ -130,15 +129,23 @@ impl<'a> Parser<'a> {
             TokenKind::LeftParen => {
                 self.advance();
                 let lhs = self.expr_with_binding_power(0)?;
-                if let None = self.expect(TokenKind::RightParen) {
-                    return Err(Error::ParserError(
-                        "expected RightParen in expression".into(),
+                if self.expect(TokenKind::RightParen).is_none() {
+                    return Err(Error::unexpected_token(
+                        Some(TokenKind::RightParen),
+                        self.peek().kind,
+                        self.peek().line,
+                        self.peek().column,
                     ));
                 }
                 lhs
             }
-            t => {
-                return Err(Error::ParserError(format!("unexpected token - {:?}", t)));
+            _ => {
+                return Err(Error::unexpected_token(
+                    None,
+                    self.peek().kind,
+                    self.peek().line,
+                    self.peek().column,
+                ));
             }
         };
         loop {
@@ -151,8 +158,13 @@ impl<'a> Parser<'a> {
                 // Can follow expression, not an error but also not an operator.
                 TokenKind::RightParen => TokenKind::RightParen,
                 // All other tokes - error.
-                t => {
-                    return Err(Error::ParserError(format!("unexpected token - {:?}", t)));
+                _ => {
+                    return Err(Error::unexpected_token(
+                        None,
+                        self.peek().kind,
+                        self.peek().line,
+                        self.peek().column,
+                    ));
                 }
             };
             if let Some((l_bp, r_bp)) = infix_binding_power(op) {
